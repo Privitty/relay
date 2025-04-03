@@ -1,5 +1,5 @@
 
-<img width="800px" src="www/src/collage-top.png"/>
+<img width="800px" src="www/src/collage-prv-top.png"/>
 
 # Chatmail relays for end-to-end encrypted e-mail
 
