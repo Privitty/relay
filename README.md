@@ -533,3 +533,6 @@ Then reboot the relay or do `sysctl -p` and `nft -f /etc/nftables.conf`.
 
 Once proxy relay is set up,
 you can add its IP address to the DNS.
+
+## Deploying on AWS
+Please follow the steps mentioned on the external link: [Chatmail Relay on AWS](https://mdeore.medium.com/chatmail-on-aws-bc97746a721e)
