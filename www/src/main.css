@@ -74,13 +74,13 @@ code {
 }
 
 .cta-button, .cta-button:hover, .cta-button:visited {
-    border: 1.5px solid #a4c2d0;
+    border: 1.5px solid #7948ef;
     border-radius: 5px;
     padding: 10px;
     display: inline-block;
     margin: 10px 0;
 
-    background: linear-gradient(120deg, #77888f, #364e59);
+    background: linear-gradient(120deg, #0f195e, #7948ef);
     color: white !important;
     font-weight: bold;
 }
