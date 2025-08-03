@@ -17,11 +17,11 @@ and which are scheduled for retry using exponential back-off timing.
 If a token notification would be scheduled more than DROP_DEADLINE seconds
 after its first attempt, it is dropped with a log error.
 
-Note that tokens are completely opaque to the notification machinery here
-and will in the future be encrypted foreclosing all ability to distinguish
+Note that tokens are opaque to the notification machinery here
+and are encrypted foreclosing all ability to distinguish
 which device token ultimately goes to which phone-provider notification service,
 or to understand the relation of "device tokens" and chatmail addresses.
-The meaning and format of tokens is basically a matter of Delta-Chat Core and
+The meaning and format of tokens is basically a matter of chatmail Core and
 the `notification.delta.chat` service.
 """
 
@@ -95,7 +95,12 @@ class Notifier:
                 logging.warning(f"removing spurious queue item: {queue_path!r}")
                 queue_path.unlink()
                 continue
-            queue_item = PersistentQueueItem.read_from_path(queue_path)
+            try:
+                queue_item = PersistentQueueItem.read_from_path(queue_path)
+            except ValueError:
+                logging.warning(f"removing spurious queue item: {queue_path!r}")
+                queue_path.unlink()
+                continue
             self.queue_for_retry(queue_item)
 
     def queue_for_retry(self, queue_item, retry_num=0):

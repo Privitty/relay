@@ -7,15 +7,33 @@ import io
 import shutil
 import subprocess
 import sys
+from io import StringIO
 from pathlib import Path
 
 from chatmaild.config import Config, read_config
 from pyinfra import facts, host
+from pyinfra.api import FactBase
 from pyinfra.facts.files import File
+from pyinfra.facts.server import Sysctl
 from pyinfra.facts.systemd import SystemdEnabled
 from pyinfra.operations import apt, files, pip, server, systemd
 
 from .acmetool import deploy_acmetool
+
+
+class Port(FactBase):
+    """
+    Returns the process occuping a port.
+    """
+
+    def command(self, port: int) -> str:
+        return (
+            "ss -lptn 'src :%d' | awk 'NR>1 {print $6,$7}' | sed 's/users:((\"//;s/\".*//'"
+            % (port,)
+        )
+
+    def process(self, output: [str]) -> str:
+        return output[0]
 
 
 def _build_chatmaild(dist_dir) -> None:
@@ -230,7 +248,6 @@ def _configure_opendkim(domain: str, dkim_selector: str = "dkim") -> bool:
     )
     need_restart |= service_file.changed
 
-
     return need_restart
 
 
@@ -301,6 +318,40 @@ def _configure_postfix(config: Config, debug: bool = False) -> bool:
     return need_restart
 
 
+def _install_dovecot_package(package: str, arch: str):
+    arch = "amd64" if arch == "x86_64" else arch
+    arch = "arm64" if arch == "aarch64" else arch
+    url = f"https://download.delta.chat/dovecot/dovecot-{package}_2.3.21%2Bdfsg1-3_{arch}.deb"
+    deb_filename = "/root/" + url.split("/")[-1]
+
+    match (package, arch):
+        case ("core", "amd64"):
+            sha256 = "43f593332e22ac7701c62d58b575d2ca409e0f64857a2803be886c22860f5587"
+        case ("core", "arm64"):
+            sha256 = "4d21eba1a83f51c100f08f2e49f0c9f8f52f721ebc34f75018e043306da993a7"
+        case ("imapd", "amd64"):
+            sha256 = "8d8dc6fc00bbb6cdb25d345844f41ce2f1c53f764b79a838eb2a03103eebfa86"
+        case ("imapd", "arm64"):
+            sha256 = "178fa877ddd5df9930e8308b518f4b07df10e759050725f8217a0c1fb3fd707f"
+        case ("lmtpd", "amd64"):
+            sha256 = "2f69ba5e35363de50962d42cccbfe4ed8495265044e244007d7ccddad77513ab"
+        case ("lmtpd", "arm64"):
+            sha256 = "89f52fb36524f5877a177dff4a713ba771fd3f91f22ed0af7238d495e143b38f"
+        case _:
+            apt.packages(packages=[f"dovecot-{package}"])
+            return
+
+    files.download(
+        name=f"Download dovecot-{package}",
+        src=url,
+        dest=deb_filename,
+        sha256sum=sha256,
+        cache_time=60 * 60 * 24 * 365 * 10,  # never redownload the package
+    )
+
+    apt.deb(name=f"Install dovecot-{package}", src=deb_filename)
+
+
 def _configure_dovecot(config: Config, debug: bool = False) -> bool:
     """Configures Dovecot IMAP server."""
     need_restart = False
@@ -348,12 +399,23 @@ def _configure_dovecot(config: Config, debug: bool = False) -> bool:
     # it is recommended to set the following inotify limits
     for name in ("max_user_instances", "max_user_watches"):
         key = f"fs.inotify.{name}"
+        if host.get_fact(Sysctl)[key] > 65535:
+            # Skip updating limits if already sufficient
+            # (enables running in incus containers where sysctl readonly)
+            continue
         server.sysctl(
             name=f"Change {key}",
             key=key,
             value=65535,
             persist=True,
         )
+
+    timezone_env = files.line(
+        name="Set TZ environment variable",
+        path="/etc/environment",
+        line="TZ=:/etc/localtime",
+    )
+    need_restart |= timezone_env.changed
 
     return need_restart
 
@@ -436,9 +498,26 @@ def check_config(config):
 
 
 def deploy_mtail(config):
-    apt.packages(
-        name="Install mtail",
-        packages=["mtail"],
+    # Uninstall mtail package, we are going to install a static binary.
+    apt.packages(name="Uninstall mtail", packages=["mtail"], present=False)
+
+    (url, sha256sum) = {
+        "x86_64": (
+            "https://github.com/google/mtail/releases/download/v3.0.8/mtail_3.0.8_linux_amd64.tar.gz",
+            "123c2ee5f48c3eff12ebccee38befd2233d715da736000ccde49e3d5607724e4",
+        ),
+        "aarch64": (
+            "https://github.com/google/mtail/releases/download/v3.0.8/mtail_3.0.8_linux_arm64.tar.gz",
+            "aa04811c0929b6754408676de520e050c45dddeb3401881888a092c9aea89cae",
+        ),
+    }[host.get_fact(facts.server.Arch)]
+
+    server.shell(
+        name="Download mtail",
+        commands=[
+            f"(echo '{sha256sum} /usr/local/bin/mtail' | sha256sum -c) || (curl -L {url} | gunzip | tar -x -f - mtail -O >/usr/local/bin/mtail.new && mv /usr/local/bin/mtail.new /usr/local/bin/mtail)",
+            "chmod 755 /usr/local/bin/mtail",
+        ],
     )
 
     # Using our own systemd unit instead of `/usr/lib/systemd/system/mtail.service`.
@@ -574,9 +653,15 @@ def deploy_chatmail(config_path: Path, disable_mail: bool) -> None:
         path="/etc/apt/sources.list",
         line="deb [signed-by=/etc/apt/keyrings/obs-home-deltachat.gpg] https://download.opensuse.org/repositories/home:/deltachat/Debian_12/ ./",
         escape_regex_characters=True,
-        ensure_newline=True,
+        present=False,
     )
 
+    if host.get_fact(Port, port=53) != "unbound":
+        files.line(
+            name="Add 9.9.9.9 to resolv.conf",
+            path="/etc/resolv.conf",
+            line="nameserver 9.9.9.9",
+        )
     apt.update(name="apt update", cache_time=24 * 3600)
     apt.upgrade(name="upgrade apt packages", auto_remove=True)
 
@@ -588,6 +673,12 @@ def deploy_chatmail(config_path: Path, disable_mail: bool) -> None:
     # Run local DNS resolver `unbound`.
     # `resolvconf` takes care of setting up /etc/resolv.conf
     # to use 127.0.0.1 as the resolver.
+    from cmdeploy.cmdeploy import Out
+
+    process_on_53 = host.get_fact(Port, port=53)
+    if process_on_53 not in (None, "unbound"):
+        Out().red(f"Can't install unbound: port 53 is occupied by: {process_on_53}")
+        exit(1)
     apt.packages(
         name="Install unbound",
         packages=["unbound", "unbound-anchor", "dnsutils"],
@@ -625,10 +716,10 @@ def deploy_chatmail(config_path: Path, disable_mail: bool) -> None:
         packages="postfix",
     )
 
-    apt.packages(
-        name="Install Dovecot",
-        packages=["dovecot-imapd", "dovecot-lmtpd"],
-    )
+    if not "dovecot.service" in host.get_fact(SystemdEnabled):
+        _install_dovecot_package("core", host.get_fact(facts.server.Arch))
+        _install_dovecot_package("imapd", host.get_fact(facts.server.Arch))
+        _install_dovecot_package("lmtpd", host.get_fact(facts.server.Arch))
 
     apt.packages(
         name="Install nginx",
@@ -724,6 +815,14 @@ def deploy_chatmail(config_path: Path, disable_mail: bool) -> None:
     apt.packages(
         name="Ensure cron is installed",
         packages=["cron"],
+    )
+    git_hash = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode()
+    git_diff = subprocess.check_output(["git", "diff"]).decode()
+    files.put(
+        name="Upload chatmail relay git commiit hash",
+        src=StringIO(git_hash + git_diff),
+        dest="/etc/chatmail-version",
+        mode="700",
     )
 
     deploy_mtail(config)

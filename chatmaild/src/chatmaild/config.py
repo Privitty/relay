@@ -26,6 +26,7 @@ class Config:
         self.max_mailbox_size = params["max_mailbox_size"]
         self.max_message_size = int(params.get("max_message_size", "31457280"))
         self.delete_mails_after = params["delete_mails_after"]
+        self.delete_large_after = params["delete_large_after"]
         self.delete_inactive_users_after = int(params["delete_inactive_users_after"])
         self.username_min_length = int(params["username_min_length"])
         self.username_max_length = int(params["username_max_length"])
@@ -64,7 +65,7 @@ class Config:
     def _getbytefile(self):
         return open(self._inipath, "rb")
 
-    def get_user(self, addr):
+    def get_user(self, addr) -> User:
         if not addr or "@" not in addr or "/" in addr:
             raise ValueError(f"invalid address {addr!r}")
 
@@ -115,7 +116,7 @@ def get_default_config_content(mail_domain, **overrides):
         lines = []
         for line in content.split("\n"):
             for key, value in privacy.items():
-                value_lines = value.strip().split("\n")
+                value_lines = value.format(mail_domain=mail_domain).strip().split("\n")
                 if not line.startswith(f"{key} =") or not value_lines:
                     continue
                 if len(value_lines) == 1:

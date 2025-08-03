@@ -69,7 +69,7 @@ Please substitute it with your own domain.
     mta-sts.chat.example.com. 3600 IN CNAME chat.example.com.
    ```
 
-2. Clone the repository and bootstrap the Python virtualenv.
+2. On your local PC, clone the repository and bootstrap the Python virtualenv.
 
    ```
     git clone https://github.com/chatmail/relay
@@ -77,30 +77,29 @@ Please substitute it with your own domain.
     scripts/initenv.sh
    ```
 
-3. Create chatmail configuration file `chatmail.ini`:
+3. On your local PC, create chatmail configuration file `chatmail.ini`:
 
    ```
     scripts/cmdeploy init chat.example.org  # <-- use your domain 
    ```
 
-4. Verify that SSH root login works:
+4. Verify that SSH root login to your remote server works:
 
    ```
-    ssh root@chat.example.org   # <-- use your domain 
+    ssh root@chat.example.org  # <-- use your domain 
    ```
 
-
-5. Deploy the remote chatmail relay server:
+5. From your local PC, deploy the remote chatmail relay server:
 
    ```
     scripts/cmdeploy run
    ```
-   This script will check that you have all necessary DNS records.
+   This script will also check that you have all necessary DNS records.
    If DNS records are missing, it will recommend
    which you should configure at your DNS provider
    (it can take some time until they are public).
 
-### Other helpful commands:
+### Other helpful commands
 
 To check the status of your remotely running chatmail service:
 
@@ -159,7 +158,7 @@ This repository has four directories:
 The `cmdeploy/src/cmdeploy/cmdeploy.py` command line tool
 helps with setting up and managing the chatmail service.
 `cmdeploy init` creates the `chatmail.ini` config file.
-`cmdeploy run` uses a [pyinfra](https://pyinfra.com/)-based [script](`cmdeploy/src/cmdeploy/__init__.py`)
+`cmdeploy run` uses a [pyinfra](https://pyinfra.com/)-based [`script`](cmdeploy/src/cmdeploy/__init__.py)
 to automatically install or upgrade all chatmail components on a relay,
 according to the `chatmail.ini` config.
 
@@ -536,3 +535,15 @@ you can add its IP address to the DNS.
 
 ## Deploying on AWS
 Please follow the steps mentioned on the external link: [Chatmail Relay on AWS](https://mdeore.medium.com/chatmail-on-aws-bc97746a721e)
+
+## Neighbors and Acquaintances
+
+Here are some related projects that you may be interested in:
+
+- [Mox](https://github.com/mjl-/mox): A Golang email server.  [Work is in
+  progress](https://github.com/mjl-/mox/issues/251) to modify it to support all
+  of the features and configuration settings required to operate as a chatmail
+  relay.
+- [Maddy-Chatmail](https://github.com/sadraiiali/maddy_chatmail): a plugin for the
+  [Maddy email server](https://maddy.email/) which aims to implement the
+  chatmail relay features and configuration options.
